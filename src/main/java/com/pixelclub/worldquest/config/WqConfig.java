@@ -91,6 +91,8 @@ public final class WqConfig {
             Tier pathfinder = new Tier("pathfinder", "Path finder", 100);
             pathfinder.commands.add("lp user %player% permission set pixelclub.unlock.pathfinder true");
             q.tiers.add(pathfinder);
+            // Opening the quest opens Endless (pixel-tower 2.0.9+: Endless is closed until this runs).
+            q.onOpenedCommands.add("tower admin endless open");
             return q;
         }
     }
