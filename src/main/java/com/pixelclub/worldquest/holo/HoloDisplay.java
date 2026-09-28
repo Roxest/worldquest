@@ -3,15 +3,18 @@ package com.pixelclub.worldquest.holo;
 import com.mojang.math.Transformation;
 import com.pixelclub.worldquest.mixin.DisplayInvoker;
 import com.pixelclub.worldquest.mixin.TextDisplayInvoker;
+import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
+import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Brightness;
+import net.minecraft.util.RandomSource;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.EntityType;
@@ -50,6 +53,12 @@ public final class HoloDisplay {
     private float monumentYaw;
     private float spinPerSecond;
     private boolean delayToggle;
+    /** The seal as an upright cylinder (world coordinates) for right-clicks and the particle ring; r ≤ 0 = none. */
+    private double sealX;
+    private double sealZ;
+    private double sealR;
+    private double sealY0;
+    private double sealY1;
 
     /** One text display per part: offsets are heights above the anchor, scales are uniform. */
     public HoloDisplay(ServerLevel level, Vec3 anchor, int range, double[] offsetsY, float[] scales, int lineWidth,
@@ -97,6 +106,92 @@ public final class HoloDisplay {
         this.spinPerSecond = spinDegreesPerSecond;
         applyMonumentTransform(0);
         d.getEntityData().packDirty();
+    }
+
+    /** Where the seal stands, for {@link #sealEntry} and the particles: centre x/z, radius, base and top heights. */
+    public void setSealVolume(double x, double z, double radius, double y0, double y1) {
+        this.sealX = x;
+        this.sealZ = z;
+        this.sealR = radius;
+        this.sealY0 = y0;
+        this.sealY1 = y1;
+    }
+
+    public boolean hasSeal() {
+        return monument != null && sealR > 0;
+    }
+
+    /** Distance from {@code eye} along the unit vector {@code look} at which it enters the seal, or -1 (miss / beyond reach). */
+    public double sealEntry(Vec3 eye, Vec3 look, double reach) {
+        if (!hasSeal()) return -1;
+        return Geometry.rayCylinderEntry(eye.x, eye.y, eye.z, look.x, look.y, look.z, sealX, sealZ, sealR, sealY0,
+                sealY1, reach);
+    }
+
+    /** A point on the seal's surface (x, y, z) at this angle and height fraction — for effects. */
+    private Vec3 onSeal(double angle, double heightFraction, double out) {
+        double r = sealR + out;
+        return new Vec3(sealX + r * Math.cos(angle), sealY0 + heightFraction * (sealY1 - sealY0), sealZ + r * Math.sin(angle));
+    }
+
+    /**
+     * One step of the rising ring: {@code packets} particle packets (2 particles each) at random points just outside
+     * the seal, to every viewer within {@code range} of it; {@code accent} (may be null) replaces every other one.
+     */
+    public void ambient(ParticleOptions ambient, ParticleOptions accent, int packets, int range, RandomSource rnd) {
+        if (!hasSeal() || ambient == null || packets <= 0 || viewers.isEmpty()) return;
+        double r2 = (double) range * range;
+        List<ServerPlayer> near = new ArrayList<>();
+        for (UUID id : viewers) {
+            ServerPlayer p = level.getServer().getPlayerList().getPlayer(id);
+            if (p == null || p.serverLevel() != level) continue;
+            double dx = p.getX() - sealX;
+            double dz = p.getZ() - sealZ;
+            if (dx * dx + dz * dz <= r2) near.add(p);
+        }
+        if (near.isEmpty()) return;
+        for (int i = 0; i < packets; i++) {
+            ParticleOptions type = accent != null && i % 2 == 1 ? accent : ambient;
+            Vec3 at = onSeal(rnd.nextDouble() * Math.PI * 2, rnd.nextDouble() * 0.85, 0.25);
+            for (ServerPlayer p : near) {
+                level.sendParticles(p, type, false, at.x, at.y, at.z, 2, 0.15, 0.3, 0.15, 0.02);
+            }
+        }
+    }
+
+    /** A burst over the whole seal for every viewer within {@code range} (a donation or an offering landed). */
+    public void burst(ParticleOptions type, int count, int range, RandomSource rnd) {
+        if (!hasSeal() || type == null || count <= 0) return;
+        double r2 = (double) range * range;
+        int packets = Math.max(1, count / 8);
+        for (UUID id : viewers) {
+            ServerPlayer p = level.getServer().getPlayerList().getPlayer(id);
+            if (p == null || p.serverLevel() != level) continue;
+            double dx = p.getX() - sealX;
+            double dz = p.getZ() - sealZ;
+            if (dx * dx + dz * dz > r2) continue;
+            for (int i = 0; i < packets; i++) {
+                Vec3 at = onSeal(rnd.nextDouble() * Math.PI * 2, 0.15 + rnd.nextDouble() * 0.8, -sealR * 0.35);
+                level.sendParticles(p, type, false, at.x, at.y, at.z, 8, 0.6, 0.6, 0.6, 0.08);
+            }
+        }
+    }
+
+    /**
+     * Moves text part {@code i} to {@code y} (absolute) and tells the current viewers; nothing is sent for a move
+     * under 1 cm. The stacked layout uses it to keep the title sitting on a body whose line count changes.
+     */
+    public void setPartY(MinecraftServer server, int i, double y) {
+        if (i < 0 || i >= parts.size()) return;
+        Display.TextDisplay d = parts.get(i);
+        if (Math.abs(d.getY() - y) < 0.01) return;
+        d.setPos(anchor.x, y, anchor.z);
+        if (viewers.isEmpty()) return;
+        ClientboundTeleportEntityPacket packet = new ClientboundTeleportEntityPacket(d);
+        for (UUID id : viewers) {
+            ServerPlayer p = server.getPlayerList().getPlayer(id);
+            if (p != null) p.connection.send(packet);
+        }
     }
 
     private void applyMonumentTransform(int interpolationTicks) {
@@ -149,6 +244,11 @@ public final class HoloDisplay {
 
     public ServerLevel level() {
         return level;
+    }
+
+    /** Current height of text part {@code i} (absolute). */
+    public double partY(int i) {
+        return parts.get(i).getY();
     }
 
     public Vec3 anchor() {

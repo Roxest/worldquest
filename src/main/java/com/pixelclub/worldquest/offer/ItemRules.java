@@ -14,7 +14,9 @@ import java.util.Map;
 
 /**
  * Which held stacks may be offered, and for how many points. Identity is the registry id plus, for custom items,
- * a required CUSTOM_DATA key — never the display name (team rule: match items by NBT, never material/name).
+ * a required CUSTOM_DATA key — never the display name (team rule: match items by NBT, never material/name). The one
+ * exception is an item whose own mod has no NBT mark and identifies it by name (Held Item Shard): then the exact
+ * name string, § codes included, which an anvil cannot produce.
  *
  * <p>A plain entry takes only unmodified items: no custom name, no lore, no enchantments, no damage, and no custom
  * data other than a <i>fresh</i> held-item-durability stamp ({@code pixelclub_hid.break_chance == 0}). A worn held
@@ -59,6 +61,30 @@ public final class ItemRules {
         }
         CustomData cd = stack.get(DataComponents.CUSTOM_DATA);
         CompoundTag tag = cd == null ? null : cd.copyTag();
+
+        if (def.requireCustomName != null && !def.requireCustomName.isEmpty()) {
+            // Identity by exact name for the one item its own mod names and nothing else (see ItemDef).
+            Component name = stack.get(DataComponents.CUSTOM_NAME);
+            if (name == null || !def.requireCustomName.equals(name.getString())) {
+                return new Verdict(Kind.NOT_ACCEPTED, def, id);
+            }
+            if (tag != null && !tag.isEmpty()) {
+                return new Verdict(Kind.SPECIAL, def, id);
+            }
+            ItemLore lore = stack.get(DataComponents.LORE);
+            if (!def.allowLore && lore != null && !lore.lines().isEmpty()) {
+                return new Verdict(Kind.SPECIAL, def, id);
+            }
+            Integer damage = stack.get(DataComponents.DAMAGE);
+            if (damage != null && damage > 0) {
+                return new Verdict(Kind.WORN, def, id);
+            }
+            ItemEnchantments ench = stack.get(DataComponents.ENCHANTMENTS);
+            if (ench != null && !ench.isEmpty()) {
+                return new Verdict(Kind.SPECIAL, def, id);
+            }
+            return new Verdict(Kind.OK, def, id);
+        }
 
         if (def.requireCustomDataKey != null && !def.requireCustomDataKey.isBlank()) {
             if (tag == null || !tag.contains(def.requireCustomDataKey)) {

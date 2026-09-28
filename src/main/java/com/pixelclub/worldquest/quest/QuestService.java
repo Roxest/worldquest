@@ -21,10 +21,21 @@ import com.pixelclub.worldquest.state.WqState.QuestState;
 import com.pixelclub.worldquest.tower.TowerBridge;
 import com.pixelclub.worldquest.util.Dispatch;
 import com.pixelclub.worldquest.util.Text;
+import com.pixelclub.worldquest.holo.Geometry;
+import com.pixelclub.worldquest.util.AuthGate;
 import it.unimi.dsi.fastutil.ints.IntList;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.particles.ParticleOptions;
+import net.minecraft.core.particles.SimpleParticleType;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket;
@@ -78,6 +89,11 @@ public final class QuestService {
 
     private static final long CONFIRM_TTL_MS = 30_000L;
     private static final long FLOOR_CACHE_MS = 60_000L;
+    private static final long SEAL_CLICK_DEBOUNCE_MS = 350L;
+
+    /** What the first right-click offered: the second one confirms it only for the same slot, item and count. */
+    private record SealPrompt(String nonce, int slot, String itemId, int count, long at) {
+    }
 
     private final MinecraftServer server;
     private final Logger log;
@@ -92,6 +108,13 @@ public final class QuestService {
     private final Map<UUID, int[]> floorCache = new HashMap<>(); // uuid -> {floor}
     private final Map<UUID, Long> floorCacheAt = new HashMap<>();
     private final Map<UUID, Long> lastConfirmAt = new HashMap<>();
+    /** The last offer prompt a right-click on the seal opened, so the next right-click can confirm it. */
+    private final Map<UUID, SealPrompt> sealPrompts = new HashMap<>();
+    /** Arclight can hand one click to the use callbacks twice; one click is one click. */
+    private final Map<UUID, Long> lastSealClickAt = new HashMap<>();
+    /** Resolved particle types per quest (ambient, accent, burst); rebuilt with the holograms. */
+    private final Map<String, ParticleOptions[]> questParticles = new HashMap<>();
+    private final RandomSource rnd = RandomSource.create();
     private final ExecutorService moneyExec = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "pxcworldquest-money");
         t.setDaemon(true);
@@ -172,6 +195,9 @@ public final class QuestService {
         if (ticks % 20 == 0) {
             refreshHolos();
             personalHints();
+        }
+        if (ticks % 5 == 0) {
+            ambientParticles();
         }
         if (ticks % 200 == 0) {
             confirms.sweep();
@@ -531,6 +557,7 @@ public final class QuestService {
                         "fundTarget", Text.num(q.fund.targetPoints))));
                 p.playNotifySound(SoundEvents.EXPERIENCE_ORB_PICKUP, SoundSource.MASTER, 0.8f, 1.1f);
             }
+            contributionFx(q, p);
             if (q.announceDonationAtLeast > 0 && amount >= q.announceDonationAtLeast) {
                 broadcast(msg(m.donationAnnounce, Map.of("player", name, "amount", Text.baht(amount),
                         "fund", q.fund.label)));
@@ -558,9 +585,10 @@ public final class QuestService {
 
     // ================================================================== items
 
-    public void requestOffer(ServerPlayer p, QuestDef q, boolean all) {
+    /** Opens an offer prompt for the main-hand stack (all = every stack of it). Returns the prompt, or null when refused. */
+    public Confirmations.Pending requestOffer(ServerPlayer p, QuestDef q, boolean all) {
         WqConfig.Messages m = config.messages;
-        if (!acceptsFund(q, p, false)) return;
+        if (!acceptsFund(q, p, false)) return null;
         ItemStack held = p.getMainHandItem();
         Map<String, ItemDef> index = config.itemIndex();
         ItemRules.Verdict v = ItemRules.check(held, index);
@@ -568,19 +596,19 @@ public final class QuestService {
         switch (v.kind()) {
             case EMPTY -> {
                 tell(p, m.offerEmptyHand);
-                return;
+                return null;
             }
             case NOT_ACCEPTED -> {
                 p.sendSystemMessage(withItem(m.prefix + m.offerNotAccepted, itemName));
-                return;
+                return null;
             }
             case WORN -> {
                 p.sendSystemMessage(withItem(m.prefix + m.offerWorn, itemName));
-                return;
+                return null;
             }
             case SPECIAL -> {
                 p.sendSystemMessage(withItem(m.prefix + m.offerSpecial, itemName));
-                return;
+                return null;
             }
             default -> {
             }
@@ -613,6 +641,7 @@ public final class QuestService {
         c.append(Component.literal(" "));
         c.append(Text.button(m.cancelButton, "/worldquest cancel " + pending.nonce, null));
         p.sendSystemMessage(c);
+        return pending;
     }
 
     private void finishOffer(ServerPlayer p, QuestDef q, Confirmations.Pending pending) {
@@ -666,7 +695,101 @@ public final class QuestService {
                 "mine", Text.num(personalPoints(q, s, p.getUUID().toString())),
                 "fundPoints", Text.num(s.fundPoints), "fundTarget", Text.num(q.fund.targetPoints))), itemName));
         p.playNotifySound(SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.MASTER, 1f, 1f);
+        contributionFx(q, p);
         store.save();
+    }
+
+    // ================================================================== the seal: right-click + effects
+
+    /**
+     * A right-click with something in hand (use-item on air, or use-on-block). True = it was aimed at a seal and is
+     * handled here (the caller cancels the vanilla use); false = not ours, vanilla goes on.
+     *
+     * <p>Only the main hand, only while the fund takes items, only for a session AuthMe has logged in: this path
+     * never passes AuthMe's command block, and it burns items. First click opens the usual prompt (chat buttons still
+     * work); a second click on the seal within rightClickConfirmSeconds, same slot, same item, same count, confirms
+     * it through {@link #confirm}, which re-checks everything. Sneaking offers every stack of the item.
+     */
+    public boolean onUse(ServerPlayer p, InteractionHand hand) {
+        if (hand != InteractionHand.MAIN_HAND || holos.isEmpty()) return false;
+        Vec3 eye = p.getEyePosition();
+        Vec3 look = p.getViewVector(1f);
+        for (Map.Entry<String, HoloDisplay> e : holos.entrySet()) {
+            HoloDisplay h = e.getValue();
+            if (h.level() != p.serverLevel() || !h.hasSeal()) continue;
+            QuestDef q = config.quest(e.getKey());
+            if (q == null || !q.hologram.rightClickOffer || !q.fund.enabled || !q.fund.acceptItems) continue;
+            double reach = Math.max(1.0, q.hologram.rightClickReach);
+            double t = h.sealEntry(eye, look, reach);
+            if (t < 0) continue;
+            Vec3 at = eye.add(look.scale(t));
+            BlockHitResult block = p.serverLevel().clip(new ClipContext(eye, at, ClipContext.Block.COLLIDER,
+                    ClipContext.Fluid.NONE, p));
+            if (block.getType() != HitResult.Type.MISS) continue; // a block stands in front of the seal
+            if (!AuthGate.notImpostor(p, log)) return false;  // AuthMe denies the use itself
+            long now = System.currentTimeMillis();
+            Long last = lastSealClickAt.put(p.getUUID(), now);
+            if (last != null && now - last < SEAL_CLICK_DEBOUNCE_MS) return true;
+            sealClick(p, q, now);
+            return true;
+        }
+        return false;
+    }
+
+    private void sealClick(ServerPlayer p, QuestDef q, long now) {
+        ItemStack held = p.getMainHandItem();
+        int slot = p.getInventory().selected;
+        SealPrompt sp = sealPrompts.remove(p.getUUID());
+        if (sp != null && now - sp.at() <= q.hologram.rightClickConfirmSeconds * 1000L && sp.slot() == slot
+                && !held.isEmpty() && held.getCount() == sp.count() && ItemRules.idOf(held).equals(sp.itemId())) {
+            confirm(p, sp.nonce());
+            return;
+        }
+        Confirmations.Pending pending = requestOffer(p, q, p.isShiftKeyDown());
+        if (pending != null) {
+            sealPrompts.put(p.getUUID(), new SealPrompt(pending.nonce, slot, pending.itemId, held.getCount(), now));
+            p.displayClientMessage(Text.of(config.messages.rightClickConfirmHint), true);
+            p.playNotifySound(SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.MASTER, 0.7f, 1.2f);
+        }
+    }
+
+    /** The giver hears it; everyone near sees the seal flare. */
+    private void contributionFx(QuestDef q, ServerPlayer giver) {
+        WqConfig.Particles pc = q.hologram.particles;
+        HoloDisplay h = holos.get(q.id);
+        ParticleOptions[] types = questParticles.get(q.id);
+        if (pc != null && pc.enabled && h != null && types != null) {
+            h.burst(types[2], pc.burstCount, Math.max(8, pc.range), rnd);
+        }
+        if (giver != null && pc != null && pc.contributionSound != null && !pc.contributionSound.isBlank()) {
+            ResourceLocation id = ResourceLocation.tryParse(pc.contributionSound);
+            var sound = id == null ? Optional.<SoundEvent>empty() : BuiltInRegistries.SOUND_EVENT.getOptional(id);
+            sound.ifPresent(s -> giver.playNotifySound(s, SoundSource.MASTER, 0.9f, 1.0f));
+        }
+    }
+
+    private void ambientParticles() {
+        for (Map.Entry<String, HoloDisplay> e : holos.entrySet()) {
+            QuestDef q = config.quest(e.getKey());
+            ParticleOptions[] types = questParticles.get(e.getKey());
+            if (q == null || types == null || types[0] == null) continue;
+            WqConfig.Particles pc = q.hologram.particles;
+            // perSecond packets, spread over the four steps a second; each step at least one
+            int packets = Math.max(1, Math.round(pc.perSecond / 4f));
+            boolean accent = types[1] != null && progressPercent(q, state(q)) >= pc.accentAtPercent;
+            e.getValue().ambient(types[0], accent ? types[1] : null, packets, Math.max(8, pc.range), rnd);
+        }
+    }
+
+    /** A simple (option-less) particle type by id, or null with one log line. */
+    private ParticleOptions particle(String questId, String id) {
+        if (id == null || id.isBlank()) return null;
+        ResourceLocation rl = ResourceLocation.tryParse(id);
+        var type = rl == null ? Optional.<net.minecraft.core.particles.ParticleType<?>>empty()
+                : BuiltInRegistries.PARTICLE_TYPE.getOptional(rl);
+        if (type.isPresent() && type.get() instanceof SimpleParticleType simple) return simple;
+        log.error("[WorldQuest] particle {} of {} is not a simple particle type — skipped", id, questId);
+        return null;
     }
 
     /** Replaces the first {item} with a (translatable) component so each client renders its own language. */
@@ -1006,6 +1129,8 @@ public final class QuestService {
             h.hideAll(server);
         }
         holos.clear();
+        questParticles.clear();
+        sealPrompts.clear();
         for (QuestDef q : config.quests) {
             if (!q.enabled) continue;
             QuestState s = store.state().quests.get(q.id);
@@ -1017,24 +1142,60 @@ public final class QuestService {
                 continue;
             }
             WqConfig.Hologram hc = q.hologram;
-            HoloDisplay h = new HoloDisplay(level, new Vec3(s.anchor.x, s.anchor.y, s.anchor.z), hc.viewRange,
-                    new double[]{hc.titleOffsetY, hc.bodyOffsetY}, new float[]{hc.titleScale, hc.bodyScale},
-                    hc.lineWidth, hc.background);
             WqConfig.Monument m = hc.monument;
+            var item = java.util.Optional.<net.minecraft.world.item.Item>empty();
             if (m != null && m.enabled) {
                 ResourceLocation id = ResourceLocation.tryParse(m.item);
-                var item = id == null ? java.util.Optional.<net.minecraft.world.item.Item>empty()
-                        : net.minecraft.core.registries.BuiltInRegistries.ITEM.getOptional(id);
-                if (item.isPresent()) {
-                    h.enableMonument(item.get(), m.offsetX, m.offsetY, m.offsetZ, m.scale, m.yawDegrees,
-                            m.spinDegreesPerSecond);
-                } else {
+                item = id == null ? item : BuiltInRegistries.ITEM.getOptional(id);
+                if (item.isEmpty()) {
                     log.error("[WorldQuest] monument item {} of {} is not a registered item — monument off", m.item, q.id);
                 }
+            }
+            boolean stacked = !"manual".equalsIgnoreCase(hc.layout);
+            double titleY = hc.titleOffsetY;
+            double bodyY = hc.bodyOffsetY;
+            if (stacked) {
+                // seal centred on the anchor, base on it; body just above the seal; title placed on the body at refresh
+                double top = item.isPresent() ? m.baseLift + Geometry.px(m.modelBaseBelowCenterPx + m.modelTopAboveCenterPx,
+                        m.scale) : 0.0;
+                bodyY = item.isPresent() ? top + hc.stackGap : hc.bodyOffsetY;
+                titleY = bodyY + Geometry.textHeight(7, hc.lineHeight, hc.bodyScale) + hc.titleGap;
+            }
+            Vec3 anchor = new Vec3(s.anchor.x, s.anchor.y, s.anchor.z);
+            HoloDisplay h = new HoloDisplay(level, anchor, hc.viewRange, new double[]{titleY, bodyY},
+                    new float[]{hc.titleScale, hc.bodyScale}, hc.lineWidth, hc.background);
+            if (item.isPresent()) {
+                if (stacked) {
+                    double centre = m.baseLift + Geometry.px(m.modelBaseBelowCenterPx, m.scale);
+                    h.enableMonument(item.get(), 0.0, centre, 0.0, m.scale, m.yawDegrees, m.spinDegreesPerSecond);
+                    h.setSealVolume(anchor.x, anchor.z, Geometry.px(m.modelRadiusPx, m.scale), anchor.y + m.baseLift,
+                            anchor.y + m.baseLift + Geometry.px(m.modelBaseBelowCenterPx + m.modelTopAboveCenterPx, m.scale));
+                } else {
+                    h.enableMonument(item.get(), m.offsetX, m.offsetY, m.offsetZ, m.scale, m.yawDegrees,
+                            m.spinDegreesPerSecond);
+                    double c = m.offsetY; // manual: the offsets are the model centre
+                    h.setSealVolume(anchor.x + m.offsetX, anchor.z + m.offsetZ, Geometry.px(m.modelRadiusPx, m.scale),
+                            anchor.y + c - Geometry.px(m.modelBaseBelowCenterPx, m.scale),
+                            anchor.y + c + Geometry.px(m.modelTopAboveCenterPx, m.scale));
+                }
+            }
+            WqConfig.Particles pc = hc.particles;
+            if (pc != null && pc.enabled) {
+                questParticles.put(q.id, new ParticleOptions[]{particle(q.id, pc.ambient), particle(q.id, pc.accent),
+                        particle(q.id, pc.burst)});
             }
             holos.put(q.id, h);
         }
         refreshHolos();
+    }
+
+    /** stacked layout: the title sits on the body, whose height follows its line count. */
+    private void placeTitle(QuestDef q, HoloDisplay h, String body) {
+        WqConfig.Hologram hc = q.hologram;
+        if ("manual".equalsIgnoreCase(hc.layout)) return;
+        double bodyBase = h.partY(1);
+        double y = bodyBase + Geometry.textHeight(Geometry.lineCount(body), hc.lineHeight, hc.bodyScale) + hc.titleGap;
+        h.setPartY(server, 0, y);
     }
 
     /**
@@ -1046,6 +1207,17 @@ public final class QuestService {
         WqConfig.Monument m = q.hologram.monument;
         if (m == null || !m.enabled) return Integer.MIN_VALUE;
         if (WqState.Phase.OPENED.equals(s.phase)) return m.openedCustomModelData;
+        int pct = progressPercent(q, s);
+        int cmd = m.stages.isEmpty() ? m.openedCustomModelData : m.stages.get(0).customModelData;
+        for (WqConfig.Stage st : m.stages) {
+            if (pct >= st.atPercent) cmd = st.customModelData;
+        }
+        return cmd;
+    }
+
+    /** Average progress of the enabled goals, each capped at 100; 100 once REACHED or OPENED. */
+    private int progressPercent(QuestDef q, QuestState s) {
+        if (WqState.Phase.REACHED.equals(s.phase) || WqState.Phase.OPENED.equals(s.phase)) return 100;
         int n = 0;
         long sum = 0;
         if (q.conquerors.enabled) {
@@ -1056,13 +1228,7 @@ public final class QuestService {
             sum += Math.min(100, Text.percent(s.fundPoints, q.fund.targetPoints));
             n++;
         }
-        int pct = n == 0 ? 100 : (int) (sum / n);
-        if (WqState.Phase.REACHED.equals(s.phase)) pct = 100;
-        int cmd = m.stages.isEmpty() ? m.openedCustomModelData : m.stages.get(0).customModelData;
-        for (WqConfig.Stage st : m.stages) {
-            if (pct >= st.atPercent) cmd = st.customModelData;
-        }
-        return cmd;
+        return n == 0 ? 100 : (int) (sum / n);
     }
 
     private ServerLevel levelOf(String dimension) {
@@ -1078,6 +1244,7 @@ public final class QuestService {
             QuestState s = state(q);
             String title = HoloText.title(config, q);
             String body = HoloText.body(config, q, s);
+            placeTitle(q, e.getValue(), body);
             e.getValue().refresh(server, new Component[]{Text.of(title), Text.of(body)}, new String[]{title, body},
                     monumentCmd(q, s));
         }

@@ -59,10 +59,13 @@ public final class HoloText {
                 lines.add(Text.fill(m.holoTop, Map.of("names", String.join(" &7· &f", top))));
             }
         }
+        boolean offerHint = q.fund.enabled && q.fund.acceptItems && h.rightClickOffer && h.monument != null
+                && h.monument.enabled;
         switch (s.phase) {
-            case WqState.Phase.REACHED -> lines.add(m.holoReached);
+            case WqState.Phase.REACHED -> lines.add(offerHint && q.acceptAfterReached
+                    ? m.holoReached + "\n" + m.holoHintOffer : m.holoReached);
             case WqState.Phase.OPENED -> lines.add(Text.fill(m.holoOpened, Map.of("quest", q.name)));
-            default -> lines.add(m.holoHint);
+            default -> lines.add(offerHint ? m.holoHintOffer : m.holoHint);
         }
         return String.join("\n", lines);
     }

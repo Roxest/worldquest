@@ -8,7 +8,13 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.InteractionResultHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -84,5 +90,30 @@ public final class WorldQuestMod implements ModInitializer {
             QuestService s = service;
             if (s != null) s.onRespawnOrWorldChange(player);
         });
+        // Right-click on the seal (a packet-only display has no hitbox, so the client sends a plain use-item on air, or
+        // a use-on-block when a block is behind it): the service ray-tests the seal and takes the click when it hits.
+        UseItemCallback.EVENT.register((player, world, hand) -> {
+            if (!world.isClientSide() && player instanceof ServerPlayer sp && sealClick(sp, hand)) {
+                return InteractionResultHolder.success(player.getItemInHand(hand));
+            }
+            return InteractionResultHolder.pass(player.getItemInHand(hand));
+        });
+        UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
+            if (!world.isClientSide() && player instanceof ServerPlayer sp && sealClick(sp, hand)) {
+                return InteractionResult.SUCCESS;
+            }
+            return InteractionResult.PASS;
+        });
+    }
+
+    private static boolean sealClick(ServerPlayer player, InteractionHand hand) {
+        QuestService s = service;
+        if (s == null) return false;
+        try {
+            return s.onUse(player, hand);
+        } catch (Throwable t) {
+            LOGGER.error("[WorldQuest] seal right-click failed", t);
+            return false;
+        }
     }
 }
