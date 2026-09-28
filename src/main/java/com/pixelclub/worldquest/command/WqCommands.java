@@ -38,7 +38,13 @@ public final class WqCommands {
     private WqCommands() {
     }
 
-    public static void register(CommandDispatcher<CommandSourceStack> d, Supplier<QuestService> svc) {
+    public static void register(CommandDispatcher<CommandSourceStack> d, Supplier<QuestService> raw) {
+        // A service that failed to start (logged at boot) answers every command with this instead of an NPE.
+        Supplier<QuestService> svc = () -> {
+            QuestService s = raw.get();
+            if (s == null) throw new IllegalStateException("WorldQuest is not running — see the server log");
+            return s;
+        };
         SuggestionProvider<CommandSourceStack> quests = (ctx, b) -> SharedSuggestionProvider.suggest(
                 svc.get().config().quests.stream().map(q -> q.id).toList(), b);
 

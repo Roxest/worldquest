@@ -32,11 +32,28 @@ public final class WqConfig {
 
     public List<QuestDef> quests = new ArrayList<>(List.of(QuestDef.endlessDefault()));
 
-    /** Items that can be offered into a fund: registry id → points per single item. */
+    /**
+     * Items that can be offered into a fund: registry id → points per single item. Starting values (2026-09-28):
+     * points = floor(PRD GTS 30-day median ÷ moneyPerPoint), SOLD listings 08-29→09-28; farmable items and items a
+     * server shop sells below their point value are left out (see vault note "World Quest").
+     */
     public List<ItemDef> items = new ArrayList<>(List.of(
+            new ItemDef("cobblemon:leftovers", 20),
+            new ItemDef("cobblemon:life_orb", 30),
             new ItemDef("cobblemon:choice_scarf", 30),
-            new ItemDef("cobblemon:choice_specs", 15),
-            new ItemDef("cobblemon:leftovers", 30)));
+            new ItemDef("cobblemon:choice_specs", 25),
+            new ItemDef("cobblemon:choice_band", 25),
+            new ItemDef("cobblemon:ability_patch", 100),
+            new ItemDef("cobblemon_utility:woodencap", 30),
+            new ItemDef("mega_showdown:ash_cap", 67),
+            new ItemDef("cobblemon_utility:hpsilvercap", 250),
+            new ItemDef("cobblemon_utility:atksilvercap", 250),
+            new ItemDef("cobblemon_utility:defsilvercap", 250),
+            new ItemDef("cobblemon_utility:spatksilvercap", 250),
+            new ItemDef("cobblemon_utility:spdefsilvercap", 250),
+            new ItemDef("cobblemon_utility:speedsilvercap", 250),
+            new ItemDef("raid_den_keys:raid_den_key_t6", 15),
+            new ItemDef("raid_den_keys:raid_den_key_t7", 10)));
 
     public Messages messages = new Messages();
 
@@ -53,8 +70,8 @@ public final class WqConfig {
         public String openMode = "manual";
         /** Keep taking donations after the goals are met (the fund keeps burning; tiers keep counting). */
         public boolean acceptAfterReached = true;
-        /** Personal points a conqueror gets for the tier ladder (never added to the fund bar). */
-        public long conquestBonusPoints = 1000;
+        /** Personal points a conqueror gets for the tier ladder (never added to the fund bar) — lands them on tier 1. */
+        public long conquestBonusPoints = 100;
         public List<Tier> tiers = new ArrayList<>();
         /** Conqueror counts that get a server-wide line when crossed. */
         public List<Integer> conquerorMilestones = new ArrayList<>(List.of(60, 70, 80, 90, 95));
