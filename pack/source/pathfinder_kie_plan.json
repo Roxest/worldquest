@@ -1,0 +1,7 @@
+{
+  "defaults": {"model": "nano-banana-pro", "aspect_ratio": "21:9", "resolution": "1K", "output_format": "png"},
+  "assets": [
+    {"name": "pathfinder_a", "prompt": "A single horizontal pixel-art title badge for a Minecraft server, centered on a pure solid black background with wide empty margins. Wide rounded-rectangle banner, aspect about 3.6 to 1. Thick ornate gold pixel border with small corner rivets. Deep violet-indigo gradient fill with a few tiny star sparkles. In the center the word PATHFINDER in bold chunky blocky pixel capitals, golden yellow with a dark brown 1-pixel outline, perfectly spelled P-A-T-H-F-I-N-D-E-R. On the left and right ends, a small golden compass-rose emblem. Crisp retro 16-bit game UI style, limited palette, hard pixel edges, no anti-aliasing blur, no other text, no watermark."},
+    {"name": "pathfinder_b", "prompt": "Pixel-art game UI title plate on a pure black background, centered, lots of black margin. Horizontal badge shaped like a rounded banner (about 3.6:1). Gold and bronze ornamental frame, dark teal-to-violet inner panel. The text PATHFINDER (spelled exactly P A T H F I N D E R) in large bold blocky pixel letters, bright gold with dark outline, centered. Small emblem on each side: a tiny tower silhouette with a star on top, gold. Crisp 16-bit pixel art, sharp pixels, limited colors, no extra words, no watermark."}
+  ]
+}
