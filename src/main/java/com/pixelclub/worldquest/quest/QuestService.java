@@ -1017,11 +1017,52 @@ public final class QuestService {
                 continue;
             }
             WqConfig.Hologram hc = q.hologram;
-            holos.put(q.id, new HoloDisplay(level, new Vec3(s.anchor.x, s.anchor.y, s.anchor.z), hc.viewRange,
+            HoloDisplay h = new HoloDisplay(level, new Vec3(s.anchor.x, s.anchor.y, s.anchor.z), hc.viewRange,
                     new double[]{hc.titleOffsetY, hc.bodyOffsetY}, new float[]{hc.titleScale, hc.bodyScale},
-                    hc.lineWidth, hc.background));
+                    hc.lineWidth, hc.background);
+            WqConfig.Monument m = hc.monument;
+            if (m != null && m.enabled) {
+                ResourceLocation id = ResourceLocation.tryParse(m.item);
+                var item = id == null ? java.util.Optional.<net.minecraft.world.item.Item>empty()
+                        : net.minecraft.core.registries.BuiltInRegistries.ITEM.getOptional(id);
+                if (item.isPresent()) {
+                    h.enableMonument(item.get(), m.offsetX, m.offsetY, m.offsetZ, m.scale, m.yawDegrees,
+                            m.spinDegreesPerSecond);
+                } else {
+                    log.error("[WorldQuest] monument item {} of {} is not a registered item — monument off", m.item, q.id);
+                }
+            }
+            holos.put(q.id, h);
         }
         refreshHolos();
+    }
+
+    /**
+     * The seal model for the quest's state: OPENED has its own model; otherwise the stage for the average progress
+     * of the enabled goals (each capped at 100), forced to 100 once REACHED so the fully broken seal and the
+     * celebration arrive together.
+     */
+    private int monumentCmd(QuestDef q, QuestState s) {
+        WqConfig.Monument m = q.hologram.monument;
+        if (m == null || !m.enabled) return Integer.MIN_VALUE;
+        if (WqState.Phase.OPENED.equals(s.phase)) return m.openedCustomModelData;
+        int n = 0;
+        long sum = 0;
+        if (q.conquerors.enabled) {
+            sum += Math.min(100, Text.percent(s.conquerors.size(), q.conquerors.target));
+            n++;
+        }
+        if (q.fund.enabled) {
+            sum += Math.min(100, Text.percent(s.fundPoints, q.fund.targetPoints));
+            n++;
+        }
+        int pct = n == 0 ? 100 : (int) (sum / n);
+        if (WqState.Phase.REACHED.equals(s.phase)) pct = 100;
+        int cmd = m.stages.isEmpty() ? m.openedCustomModelData : m.stages.get(0).customModelData;
+        for (WqConfig.Stage st : m.stages) {
+            if (pct >= st.atPercent) cmd = st.customModelData;
+        }
+        return cmd;
     }
 
     private ServerLevel levelOf(String dimension) {
@@ -1037,7 +1078,8 @@ public final class QuestService {
             QuestState s = state(q);
             String title = HoloText.title(config, q);
             String body = HoloText.body(config, q, s);
-            e.getValue().refresh(server, new Component[]{Text.of(title), Text.of(body)}, new String[]{title, body});
+            e.getValue().refresh(server, new Component[]{Text.of(title), Text.of(body)}, new String[]{title, body},
+                    monumentCmd(q, s));
         }
     }
 

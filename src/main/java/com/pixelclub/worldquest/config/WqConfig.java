@@ -148,6 +148,44 @@ public final class WqConfig {
         /** Actionbar hint for players this close (blocks); 0 = off. */
         public int personalHintRange = 8;
         public int personalHintSeconds = 20;
+        public Monument monument = new Monument();
+    }
+
+    /**
+     * A 3D model from the server resource pack (PixelclubPack: paper + custom_model_data) shown as a packet-only
+     * ItemDisplay at the hologram — the seal that breaks as the quest fills. Off until the models are in the pack.
+     */
+    public static final class Monument {
+        public boolean enabled = false;
+        public String item = "minecraft:paper";
+        /** Highest stage whose atPercent ≤ progress wins; progress = average of the enabled goals, each capped at 100. */
+        public List<Stage> stages = new ArrayList<>(List.of(new Stage(0, 12001), new Stage(25, 12002),
+                new Stage(50, 12003), new Stage(75, 12004), new Stage(100, 12005)));
+        /** Model once the quest is opened. */
+        public int openedCustomModelData = 12006;
+        /** Uniform scale; an item model's 16 px = 1 block at scale 1, centred on the entity. */
+        public float scale = 3.0f;
+        /** Model centre relative to the hologram anchor, in blocks. */
+        public double offsetX = 0.0;
+        public double offsetY = 1.6;
+        public double offsetZ = 0.0;
+        /** Facing, degrees around Y (0 = the model's +Z face looks south). */
+        public float yawDegrees = 0f;
+        /** Slow turn, degrees per second; 0 = still. Interpolated client-side between once-a-second updates. */
+        public float spinDegreesPerSecond = 0f;
+    }
+
+    public static final class Stage {
+        public int atPercent;
+        public int customModelData;
+
+        public Stage() {
+        }
+
+        public Stage(int atPercent, int customModelData) {
+            this.atPercent = atPercent;
+            this.customModelData = customModelData;
+        }
     }
 
     public static final class ItemDef {
@@ -290,6 +328,9 @@ public final class WqConfig {
                 if (q.fund == null) q.fund = new FundGoal();
                 if (q.tiers == null) q.tiers = new ArrayList<>();
                 if (q.hologram == null) q.hologram = new Hologram();
+                if (q.hologram.monument == null) q.hologram.monument = new Monument();
+                if (q.hologram.monument.stages == null) q.hologram.monument.stages = new ArrayList<>();
+                q.hologram.monument.stages.sort((a, b) -> Integer.compare(a.atPercent, b.atPercent));
                 if (q.conquerorMilestones == null) q.conquerorMilestones = new ArrayList<>();
                 if (q.fundMilestonesPercent == null) q.fundMilestonesPercent = new ArrayList<>();
                 if (q.onReachedCommands == null) q.onReachedCommands = new ArrayList<>();

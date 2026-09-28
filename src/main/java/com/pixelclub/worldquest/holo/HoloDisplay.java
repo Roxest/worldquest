@@ -12,8 +12,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Brightness;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomModelData;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -38,6 +42,14 @@ public final class HoloDisplay {
     private final List<Display.TextDisplay> parts = new ArrayList<>();
     private final List<String> lastKeys = new ArrayList<>();
     private final Set<UUID> viewers = new HashSet<>();
+    /** The seal model (PixelclubPack item model on an ItemDisplay); null when the monument is off. */
+    private Display.ItemDisplay monument;
+    private Item monumentItem;
+    private int monumentCmd = Integer.MIN_VALUE;
+    private float monumentScale = 1f;
+    private float monumentYaw;
+    private float spinPerSecond;
+    private boolean delayToggle;
 
     /** One text display per part: offsets are heights above the anchor, scales are uniform. */
     public HoloDisplay(ServerLevel level, Vec3 anchor, int range, double[] offsetsY, float[] scales, int lineWidth,
@@ -65,6 +77,74 @@ public final class HoloDisplay {
         for (Display.TextDisplay d : parts) {
             d.getEntityData().packDirty(); // the initial values go out with the add packet, not as a later update
         }
+    }
+
+    /**
+     * Adds the seal model. Item models are drawn centred on the entity (model-space 8,8,8 = entity position), so
+     * the offset is to the model's centre. Brightness is pinned so the seal does not go dark at night.
+     */
+    public void enableMonument(Item item, double dx, double dy, double dz, float scale, float yawDegrees,
+                               float spinDegreesPerSecond) {
+        Display.ItemDisplay d = new Display.ItemDisplay(EntityType.ITEM_DISPLAY, level);
+        d.setPos(anchor.x + dx, anchor.y + dy, anchor.z + dz);
+        DisplayInvoker di = (DisplayInvoker) d;
+        di.pxcwq$setBrightnessOverride(new Brightness(15, 15));
+        di.pxcwq$setViewRange(2.0f);
+        this.monument = d;
+        this.monumentItem = item;
+        this.monumentScale = scale;
+        this.monumentYaw = yawDegrees;
+        this.spinPerSecond = spinDegreesPerSecond;
+        applyMonumentTransform(0);
+        d.getEntityData().packDirty();
+    }
+
+    private void applyMonumentTransform(int interpolationTicks) {
+        DisplayInvoker di = (DisplayInvoker) monument;
+        float s = monumentScale;
+        di.pxcwq$setTransformation(new Transformation(new Vector3f(),
+                new Quaternionf().rotateY((float) Math.toRadians(monumentYaw)), new Vector3f(s, s, s), new Quaternionf()));
+        if (interpolationTicks > 0) {
+            di.pxcwq$setTransformationInterpolationDuration(interpolationTicks);
+            // The client restarts an interpolation only when the start-delay value arrives changed, so it is
+            // toggled 0/1 on every step — otherwise the second and later turns would snap instead of glide.
+            delayToggle = !delayToggle;
+            di.pxcwq$setTransformationInterpolationDelay(delayToggle ? 1 : 0);
+        }
+    }
+
+    /** Shows the model for this custom_model_data (only sent when it changed). */
+    private void setMonumentModel(MinecraftServer server, int cmd) {
+        if (monument == null || cmd == monumentCmd) return;
+        monumentCmd = cmd;
+        ItemStack stack = new ItemStack(monumentItem);
+        stack.set(DataComponents.CUSTOM_MODEL_DATA, new CustomModelData(cmd));
+        monument.getSlot(0).set(stack);
+        sendDirty(server, monument);
+    }
+
+    private void spinStep(MinecraftServer server) {
+        if (monument == null || spinPerSecond == 0f) return;
+        monumentYaw = (monumentYaw + spinPerSecond) % 360f;
+        applyMonumentTransform(20);
+        sendDirty(server, monument);
+    }
+
+    private void sendDirty(MinecraftServer server, Display d) {
+        List<SynchedEntityData.DataValue<?>> dirty = d.getEntityData().packDirty();
+        if (dirty == null || viewers.isEmpty()) return;
+        ClientboundSetEntityDataPacket packet = new ClientboundSetEntityDataPacket(d.getId(), dirty);
+        for (UUID id : viewers) {
+            ServerPlayer p = server.getPlayerList().getPlayer(id);
+            if (p != null) p.connection.send(packet);
+        }
+    }
+
+    /** refresh() plus the seal: its model for the current stage, and one spin step (called once a second). */
+    public void refresh(MinecraftServer server, Component[] texts, String[] keys, int monumentCmd) {
+        setMonumentModel(server, monumentCmd);
+        spinStep(server);
+        refresh(server, texts, keys);
     }
 
     public ServerLevel level() {
@@ -124,14 +204,21 @@ public final class HoloDisplay {
 
     private void show(ServerPlayer p) {
         for (Display.TextDisplay d : parts) {
-            p.connection.send(new ClientboundAddEntityPacket(d.getId(), d.getUUID(), d.getX(), d.getY(), d.getZ(),
-                    0f, 0f, EntityType.TEXT_DISPLAY, 0, Vec3.ZERO, 0.0));
-            List<SynchedEntityData.DataValue<?>> values = d.getEntityData().getNonDefaultValues();
-            if (values != null) {
-                p.connection.send(new ClientboundSetEntityDataPacket(d.getId(), values));
-            }
+            addFor(p, d, EntityType.TEXT_DISPLAY);
+        }
+        if (monument != null) {
+            addFor(p, monument, EntityType.ITEM_DISPLAY);
         }
         viewers.add(p.getUUID());
+    }
+
+    private static void addFor(ServerPlayer p, Display d, EntityType<?> type) {
+        p.connection.send(new ClientboundAddEntityPacket(d.getId(), d.getUUID(), d.getX(), d.getY(), d.getZ(),
+                0f, 0f, type, 0, Vec3.ZERO, 0.0));
+        List<SynchedEntityData.DataValue<?>> values = d.getEntityData().getNonDefaultValues();
+        if (values != null) {
+            p.connection.send(new ClientboundSetEntityDataPacket(d.getId(), values));
+        }
     }
 
     private void hide(ServerPlayer p) {
@@ -140,8 +227,10 @@ public final class HoloDisplay {
     }
 
     private int[] ids() {
-        int[] ids = new int[parts.size()];
-        for (int i = 0; i < ids.length; i++) ids[i] = parts.get(i).getId();
+        int n = parts.size() + (monument != null ? 1 : 0);
+        int[] ids = new int[n];
+        for (int i = 0; i < parts.size(); i++) ids[i] = parts.get(i).getId();
+        if (monument != null) ids[n - 1] = monument.getId();
         return ids;
     }
 

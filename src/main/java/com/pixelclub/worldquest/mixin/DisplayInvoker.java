@@ -21,4 +21,10 @@ public interface DisplayInvoker {
 
     @Invoker("setViewRange")
     void pxcwq$setViewRange(float range);
+
+    @Invoker("setTransformationInterpolationDuration")
+    void pxcwq$setTransformationInterpolationDuration(int ticks);
+
+    @Invoker("setTransformationInterpolationDelay")
+    void pxcwq$setTransformationInterpolationDelay(int ticks);
 }
