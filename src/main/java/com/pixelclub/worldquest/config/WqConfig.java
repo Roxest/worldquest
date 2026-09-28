@@ -141,7 +141,7 @@ public final class WqConfig {
         public float titleScale = 1.6f;
         public float bodyScale = 1.0f;
         /** Height above the anchor of the title and the body, in blocks. */
-        public double titleOffsetY = 3.35;
+        public double titleOffsetY = 2.45;
         public double bodyOffsetY = 0.0;
         /** ARGB background; 0x40000000 = vanilla nametag box. */
         public int background = 0x70000000;

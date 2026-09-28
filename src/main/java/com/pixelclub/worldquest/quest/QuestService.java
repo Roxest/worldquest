@@ -436,6 +436,7 @@ public final class QuestService {
     }
 
     private void prompt(ServerPlayer p, String line, Confirmations.Pending pending) {
+        logPrompt(p, pending);
         WqConfig.Messages m = config.messages;
         MutableComponent c = Text.of(m.prefix + line + " ");
         c.append(Text.button(m.confirmButton, "/worldquest confirm " + pending.nonce,
@@ -443,6 +444,16 @@ public final class QuestService {
         c.append(Component.literal(" "));
         c.append(Text.button(m.cancelButton, "/worldquest cancel " + pending.nonce, null));
         p.sendSystemMessage(c);
+    }
+
+    /**
+     * One line per prompt: what was offered and its nonce — so "I clicked and nothing happened" can be answered
+     * from the log. The nonce is harmless in the log: it only works for its own player and for 30 s.
+     */
+    private void logPrompt(ServerPlayer p, Confirmations.Pending pending) {
+        log.info("[WorldQuest] prompt {} player={} amount={} points={} item={} slots={} nonce={}", pending.kind,
+                p.getGameProfile().getName(), pending.amount, pending.points, pending.itemId, pending.slots.size(),
+                pending.nonce);
     }
 
     public void cancel(ServerPlayer p, String nonce) {
@@ -594,6 +605,7 @@ public final class QuestService {
         long points = count * v.def().points;
         Confirmations.Pending pending = confirms.put(p.getUUID(), Confirmations.Kind.OFFER, q.id, count, points,
                 v.itemId(), slots, CONFIRM_TTL_MS);
+        logPrompt(p, pending);
         String line = msg(m.offerConfirm, Map.of("count", Text.num(count), "points", Text.num(points)));
         MutableComponent c = withItem(m.prefix + line + " ", itemName);
         c.append(Text.button(m.confirmButton, "/worldquest confirm " + pending.nonce,
@@ -607,19 +619,33 @@ public final class QuestService {
         WqConfig.Messages m = config.messages;
         if (!acceptsFund(q, p, false)) return;
         var items = p.getInventory().items;
-        // Re-validate every slot against the exact copy taken at prompt time (item, components and count).
+        Map<String, ItemDef> index = config.itemIndex();
+        ItemDef def = index.get(pending.itemId);
+        if (def == null) {
+            tell(p, m.offerChanged);
+            return;
+        }
+        // Re-validate every slot NOW: same item, same count, and the stack as it is now still passes the item
+        // rules (points depend only on id x count). Not full component equality: on dev a plain stack failed
+        // ItemStack.matches against its own prompt-time copy with nothing visible changed (09-28), so something
+        // touches components in between; the difference is logged so the mod doing it can be named.
         for (Confirmations.SlotSnap snap : pending.slots) {
-            if (snap.slot() < 0 || snap.slot() >= items.size()
-                    || !ItemStack.matches(items.get(snap.slot()), snap.copy())) {
+            ItemStack now = snap.slot() >= 0 && snap.slot() < items.size() ? items.get(snap.slot()) : ItemStack.EMPTY;
+            ItemStack then = snap.copy();
+            ItemRules.Verdict v = ItemRules.check(now, index);
+            boolean same = !now.isEmpty() && now.getItem() == then.getItem() && now.getCount() == then.getCount()
+                    && v.ok() && pending.itemId.equals(v.itemId());
+            if (!same) {
+                log.info("[WorldQuest] offer refused at confirm: player={} slot={} then={}x{} now={}x{} verdict={}",
+                        p.getGameProfile().getName(), snap.slot(), ItemRules.idOf(then), then.getCount(),
+                        now.isEmpty() ? "empty" : ItemRules.idOf(now), now.getCount(), v.kind());
                 tell(p, m.offerChanged);
                 return;
             }
-        }
-        ItemDef def = config.itemIndex().get(pending.itemId);
-        ItemRules.Verdict v = ItemRules.check(pending.slots.get(0).copy(), config.itemIndex());
-        if (def == null || !v.ok()) {
-            tell(p, m.offerChanged);
-            return;
+            if (!ItemStack.matches(now, then)) {
+                log.info("[WorldQuest] offer slot {} of {} changed components between prompt and confirm: then={} now={}",
+                        snap.slot(), p.getGameProfile().getName(), then.getComponentsPatch(), now.getComponentsPatch());
+            }
         }
         long count = 0;
         for (Confirmations.SlotSnap snap : pending.slots) {
