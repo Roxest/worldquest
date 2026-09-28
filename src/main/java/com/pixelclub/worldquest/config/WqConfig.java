@@ -85,9 +85,11 @@ public final class WqConfig {
 
         public static QuestDef endlessDefault() {
             QuestDef q = new QuestDef();
-            q.tiers.add(new Tier("t1", "ผู้ร่วมปลดผนึก", 100));
-            q.tiers.add(new Tier("t2", "ผู้อุปถัมภ์", 1_000));
-            q.tiers.add(new Tier("t3", "ผู้บุกเบิก", 5_000));
+            // Every floor-100 conqueror lands here (conquestBonusPoints) and unlocks the "Path finder" title in /tags
+            // (Kraus 2026-09-28). Donation tiers come back with the fund.
+            Tier pathfinder = new Tier("pathfinder", "Path finder", 100);
+            pathfinder.commands.add("lp user %player% permission set pixelclub.unlock.pathfinder true");
+            q.tiers.add(pathfinder);
             return q;
         }
     }
@@ -263,7 +265,7 @@ public final class WqConfig {
         public String notAccepting = "&7ตอนนี้{fund}ไม่รับบริจาค";
         public String noQuest = "&7ตอนนี้ไม่มีภารกิจโลก";
 
-        public String tierReached = "&fคุณได้ระดับ &e{tier} &fในภารกิจโลก &7(แต้ม {points})";
+        public String tierReached = "&fคุณได้รับฉายา &e{tier} &fจากภารกิจโลก &7— เลือกใส่ได้ที่ &b/tags";
 
         public String infoHeader = "&6ภารกิจโลก &7— &f{quest}";
         public String infoConquerors = "&7- &f{label} &e{count}&7/{target}";
