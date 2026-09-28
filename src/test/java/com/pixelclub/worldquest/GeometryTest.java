@@ -65,7 +65,7 @@ class GeometryTest {
         assertEquals("stacked", h.layout);
         WqConfig.Monument m = h.monument;
         double top = Geometry.px(m.modelBaseBelowCenterPx + m.modelTopAboveCenterPx, m.scale);
-        assertTrue(top > 10 && top < 12, "a big seal: ~11 blocks, was " + top);
+        assertTrue(top > 8 && top < 10, "a big seal: ~9 blocks, was " + top);
         assertTrue(h.stackGap > 0);
     }
 

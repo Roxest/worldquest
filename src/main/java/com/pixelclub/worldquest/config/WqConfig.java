@@ -154,7 +154,7 @@ public final class WqConfig {
          */
         public String layout = "stacked";
         /** stacked: blocks between the top of the seal and the bottom of the body text. */
-        public double stackGap = 0.4;
+        public double stackGap = 0.3;
         /** stacked: blocks between the top of the body text and the bottom of the title. */
         public double titleGap = 0.2;
         /** Height of one text line at scale 1, blocks (a text display draws 10 px lines at 0.025 block per px). */
@@ -193,10 +193,10 @@ public final class WqConfig {
         public int openedCustomModelData = 12006;
         /**
          * Uniform scale; an item model's 16 px = 1 block at scale 1, centred on the entity (model-space 8,8,8). The seal
-         * models are ~43 px tall with their base 21.5 px below that centre: scale 4 → a ~10.8-block monument, ~6.9
-         * blocks across (Kraus 2026-09-28: make it big).
+         * models are ~43 px tall with their base 21.5 px below that centre: scale 3.2 → a ~8.6-block monument, ~5.5
+         * blocks across (Kraus 2026-09-28: make it big; 4.0 put the text too high to read from 16 blocks — seen on dev).
          */
-        public float scale = 4.0f;
+        public float scale = 3.2f;
         /**
          * The seal's measurements in model px, from the exported item models (pack/…/seal_stage*.json): base 21.5
          * below the model centre, top 23.9 above it at the tallest stage (opened; the others 21.7), half-width 13.84.
