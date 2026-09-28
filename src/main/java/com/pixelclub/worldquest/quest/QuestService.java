@@ -122,6 +122,7 @@ public final class QuestService {
         econ = ImpactorEconomy.probe(log);
         tower.probe();
         rebuildHolos();
+        rewardSweep();
         checkInvariants();
         nextSyncAt = ticks + 20L * 20; // first tower sync 20 s after boot, once every mod is up
         log.info("[WorldQuest] started — quests={} economy={} tower={} state={}", config.quests.size(),
@@ -129,13 +130,13 @@ public final class QuestService {
     }
 
     public String reload() {
-        String before = configError;
         loadConfig();
         rebuildHolos();
+        rewardSweep();
         for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             payOwed(p);
         }
-        return configError == null ? "ok" : "config error: " + configError + (before == null ? "" : "");
+        return configError == null ? "ok" : "config error: " + configError;
     }
 
     private void loadConfig() {
@@ -707,24 +708,57 @@ public final class QuestService {
         return best;
     }
 
-    private void checkTiers(QuestDef q, QuestState s, String uuid, String name, boolean tellPlayer) {
+    /**
+     * Announces newly reached tiers (once, tierGranted) and delivers each reached tier's reward commands once
+     * (tiersRewarded) — run now for an online player, queued otherwise. The two are tracked apart so commands
+     * added to a tier after players reached it are still delivered: {@link #rewardSweep()} re-runs this for
+     * everyone at boot and reload.
+     */
+    private boolean checkTiers(QuestDef q, QuestState s, String uuid, String name, boolean tellPlayer) {
         long pts = personalPoints(q, s, uuid);
         WqState.PlayerRec r = s.player(uuid, name);
-        for (int i = r.tierGranted + 1; i < q.tiers.size(); i++) {
+        if (r.tiersRewarded == null) r.tiersRewarded = new java.util.TreeSet<>();
+        ServerPlayer p = server.getPlayerList().getPlayer(UUID.fromString(uuid));
+        boolean changed = false;
+        for (int i = 0; i < q.tiers.size(); i++) {
             WqConfig.Tier t = q.tiers.get(i);
             if (pts < t.points) break;
-            r.tierGranted = i;
-            List<String> cmds = expand(t.commands, uuid, r.name, t, pts);
-            ledger.record("TIER", ordered("quest", q.id, "uuid", uuid, "name", r.name, "tier", t.id,
-                    "points", pts, "commands", cmds.size()));
-            ServerPlayer p = server.getPlayerList().getPlayer(UUID.fromString(uuid));
-            if (p != null) {
-                if (tellPlayer) tell(p, msg(config.messages.tierReached, Map.of("tier", t.name, "points", Text.num(pts))));
-                for (String c : cmds) Dispatch.console(server, log, c);
-            } else {
-                s.owe(uuid, cmds);
+            if (i > r.tierGranted) {
+                r.tierGranted = i;
+                changed = true;
+                ledger.record("TIER", ordered("quest", q.id, "uuid", uuid, "name", r.name, "tier", t.id,
+                        "points", pts));
+                if (p != null && tellPlayer) {
+                    tell(p, msg(config.messages.tierReached, Map.of("tier", t.name, "points", Text.num(pts))));
+                }
+            }
+            if (t.commands != null && !t.commands.isEmpty() && r.tiersRewarded.add(t.id)) {
+                changed = true;
+                List<String> cmds = expand(t.commands, uuid, r.name, t, pts);
+                ledger.record("TIER_REWARD", ordered("quest", q.id, "uuid", uuid, "name", r.name, "tier", t.id,
+                        "commands", cmds.size(), "delivery", p != null ? "now" : "queued"));
+                if (p != null) {
+                    for (String c : cmds) Dispatch.console(server, log, c);
+                } else {
+                    s.owe(uuid, cmds);
+                }
             }
         }
+        return changed;
+    }
+
+    /** Backfill: every recorded player gets any tier reward they reached but never received (boot, reload). */
+    private void rewardSweep() {
+        if (frozen()) return;
+        boolean changed = false;
+        for (QuestDef q : config.quests) {
+            QuestState s = store.state().quests.get(q.id);
+            if (s == null) continue;
+            for (String uuid : new ArrayList<>(s.players.keySet())) {
+                changed |= checkTiers(q, s, uuid, null, false);
+            }
+        }
+        if (changed) store.save();
     }
 
     private static List<String> expand(List<String> commands, String uuid, String name, WqConfig.Tier t, long pts) {

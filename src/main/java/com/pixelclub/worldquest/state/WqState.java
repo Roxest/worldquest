@@ -71,8 +71,13 @@ public final class WqState {
         public long fundPoints;
         public long money;
         public long itemPoints;
-        /** Index into the quest's sorted tier list of the highest tier already granted; -1 = none. */
+        /** Index into the quest's sorted tier list of the highest tier already reached (announced); -1 = none. */
         public int tierGranted = -1;
+        /**
+         * Tier ids whose reward commands were run or queued. Separate from tierGranted so commands added to a tier
+         * later still reach everyone who reached it earlier (backfilled at boot, reload and join).
+         */
+        public TreeSet<String> tiersRewarded = new TreeSet<>();
         public long firstAt;
         public long lastAt;
     }
