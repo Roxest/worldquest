@@ -104,7 +104,11 @@ public final class WqConfig {
     }
 
     public static final class FundGoal {
-        public boolean enabled = true;
+        /**
+         * Off by default (Kraus 2026-09-28): with one reward for any amount, a big donor and a small one get the same
+         * thing and people would complain. The item list and the money path stay in place for when it has a design.
+         */
+        public boolean enabled = false;
         public String label = "กองทุนปลดผนึก";
         public long targetPoints = 50_000L;
         public boolean acceptMoney = true;
