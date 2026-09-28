@@ -11,5 +11,11 @@
 - Then: `pixelclub reload` → wait ~10 s → `pixelclub pack update` → `fdm reload`.
 - Grant: the world quest tier `pathfinder` runs `lp user %player% permission set pixelclub.unlock.pathfinder true`.
 
-## Seal monument
-Models from the Blockbench headless worker go in `PixelclubPack/{items,models/worldquest,textures/item/worldquest}` (CMD 12001–12006).
+## Seal monument (CMD 12001–12006, PAPER)
+- `PixelclubPack/items/worldquest.yml` + `models/worldquest/seal_stage*.json` (6) + `textures/item/worldquest/seal_tower.png`
+  → copy into `config/PixelclubPack/` → `pixelclub reload` → wait → `pixelclub pack update`; check that
+  `assets/minecraft/models/item/paper.json` in `generated/pack.zip` has overrides 12001–12006 (dev 2026-09-28: 6/6).
+- Stages: 12001 sealed · 12002 25% · 12003 50% · 12004 75% · 12005 reached · 12006 opened. Seal on the model's −Z face
+  (item display turns it 180° → yaw 0 faces south). 45 px tall, base 21.5 px below the item centre.
+- Source: `source/blockbench/master.bbmodel` (24 named groups), `stages/*.bbmodel`, `src/build.py all` rebuilds every
+  stage and export (headless Blockbench MCP, `F:/Pixelclub/tools/bbmcp.py`). Preview: `source/contact_sheet_all_stages.png`.

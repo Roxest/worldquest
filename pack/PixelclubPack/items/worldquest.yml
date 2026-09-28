@@ -1,0 +1,47 @@
+# World quest 'Unseal the Endless Tower' -- the seal monument next to the spawn hologram (pxc-worldquest).
+#
+# Not items anyone is given: they exist so PackBuilder reserves the custom_model_data and ships the models;
+# pxc-worldquest hangs the stage model on a packet-only item_display (hologram.monument in its config).
+# Stage = highest atPercent <= progress (0/25/50/75/100), 12006 once the quest is opened.
+# One texture for all six: textures/item/worldquest/seal_tower.png (pixelclub:item/worldquest/seal_tower).
+# Source + generator: F:/Pixelclub/blockbench-models/worldquest (master.bbmodel, src/build.py).
+#
+# Model front (the seal) is the model's -Z face. ItemDisplayRenderer turns items 180 deg about Y, so at
+# monument.yawDegrees = 0 the seal looks SOUTH. Geometry spans y -13.5..31.9 (45 units) around the item centre (8,8,8):
+# at scale 3 the base sits 4.03 blocks below the entity, the crystal 4.48 above; footprint 24 x 26 units.
+
+worldquest_seal_stage1_sealed:
+  display_name: "&5Endless Tower Seal &7(Sealed)"
+  material: PAPER
+  model: pixelclub:worldquest/seal_stage1_sealed
+  custom_model_data: 12001
+
+worldquest_seal_stage2_25:
+  display_name: "&5Endless Tower Seal &7(25%)"
+  material: PAPER
+  model: pixelclub:worldquest/seal_stage2_25
+  custom_model_data: 12002
+
+worldquest_seal_stage3_50:
+  display_name: "&5Endless Tower Seal &7(50%)"
+  material: PAPER
+  model: pixelclub:worldquest/seal_stage3_50
+  custom_model_data: 12003
+
+worldquest_seal_stage4_75:
+  display_name: "&5Endless Tower Seal &7(75%)"
+  material: PAPER
+  model: pixelclub:worldquest/seal_stage4_75
+  custom_model_data: 12004
+
+worldquest_seal_stage5_100:
+  display_name: "&5Endless Tower Seal &7(100%)"
+  material: PAPER
+  model: pixelclub:worldquest/seal_stage5_100
+  custom_model_data: 12005
+
+worldquest_seal_stage6_opened:
+  display_name: "&5Endless Tower Seal &7(Opened)"
+  material: PAPER
+  model: pixelclub:worldquest/seal_stage6_opened
+  custom_model_data: 12006
