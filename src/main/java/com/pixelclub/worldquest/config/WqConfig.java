@@ -169,13 +169,20 @@ public final class WqConfig {
                 new Stage(50, 12003), new Stage(75, 12004), new Stage(100, 12005)));
         /** Model once the quest is opened. */
         public int openedCustomModelData = 12006;
-        /** Uniform scale; an item model's 16 px = 1 block at scale 1, centred on the entity. */
-        public float scale = 3.0f;
-        /** Model centre relative to the hologram anchor, in blocks. */
-        public double offsetX = 0.0;
-        public double offsetY = 1.6;
+        /**
+         * Uniform scale; an item model's 16 px = 1 block at scale 1, centred on the entity (model-space 8,8,8). The seal
+         * models are 45 px tall with their base 21.5 px below that centre, so the base sits 1.344 × scale blocks below
+         * the entity: scale 2.2 → a ~6.2-block monument whose base is 2.96 blocks down.
+         */
+        public float scale = 2.2f;
+        /** Model centre relative to the hologram anchor, in blocks: base on the anchor, beside (west of) the text. */
+        public double offsetX = -3.2;
+        public double offsetY = 2.96;
         public double offsetZ = 0.0;
-        /** Facing, degrees around Y (0 = the model's +Z face looks south). */
+        /**
+         * Facing, degrees around Y. The 1.21.1 item-display renderer turns an item 180°, so with the seal on the model's
+         * −Z face, 0 means the seal looks south (+Z).
+         */
         public float yawDegrees = 0f;
         /** Slow turn, degrees per second; 0 = still. Interpolated client-side between once-a-second updates. */
         public float spinDegreesPerSecond = 0f;
