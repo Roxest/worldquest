@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "pxcworldquest",
+  "version": "${version}",
+  "name": "Pixelclub World Quest",
+  "description": "Server-wide community quests shown on a spawn hologram: tower conquerors plus a donation fund (money and items are burned) that unlock future content.",
+  "authors": [
+    "Pixelclub"
+  ],
+  "contact": {},
+  "license": "All Rights Reserved",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "com.pixelclub.worldquest.WorldQuestMod"
+    ]
+  },
+  "mixins": [
+    "pxcworldquest.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "~1.21.1",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "impactor": "*",
+    "pixel-tower": "*"
+  }
+}

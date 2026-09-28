@@ -1,0 +1,9 @@
+build/
+.gradle/
+run/
+*.log
+port/decompile/
+port/resources/
+port/prd-config/
+port/db/
+logs/

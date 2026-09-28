@@ -1,0 +1,61 @@
+plugins {
+    id 'fabric-loom' version '1.9-SNAPSHOT'
+    id 'java'
+}
+
+version = project.mod_version
+group = project.mod_group
+
+repositories {
+    maven { url "https://maven.fabricmc.net/" }
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
+
+    // Impactor economy API — compileOnly; the Impactor-Fabric mod provides it at runtime.
+    // Same slim jar coinflip-fabric compiles against (net/impactdev/impactor/api/** extracted
+    // from the Impactor-Fabric-5.3.5+1.21.1.jar that runs on dev/PRD).
+    compileOnly files("libs/impactor-api-5.3.5-slim.jar", "libs/event-api-5.0.0-SNAPSHOT.jar")
+    compileOnly "net.kyori:adventure-api:4.17.0"
+    compileOnly "net.kyori:adventure-key:4.17.0"
+
+    // gson is provided by Minecraft at runtime.
+    compileOnly "com.google.code.gson:gson:2.10.1"
+
+    testImplementation platform("org.junit:junit-bom:5.10.2")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation "com.google.code.gson:gson:2.10.1"
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.withType(JavaCompile).configureEach {
+    // UTF-8 is required: the default config and messages carry Thai literals.
+    options.release = 21
+    options.encoding = 'UTF-8'
+}
+
+test {
+    useJUnitPlatform()
+    systemProperty 'file.encoding', 'UTF-8'
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+    }
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
