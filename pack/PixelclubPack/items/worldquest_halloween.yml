@@ -1,0 +1,15 @@
+# World quest Halloween 2026 -- the candy players feed to the pumpkin monument (pxc-worldquest event quest).
+# pxc-worldquest matches it by this id (event.json candyItemId = halloween_candy) through PixelclubPack's
+# strict id lookup, so a renamed paper is not candy. Texture: 16x16 from Kraus 10-16 (wrapped orange candy).
+
+halloween_candy:
+  material: PAPER
+  display_name: "&#FF9A3Cลูกอมฮาโลวีน"
+  texture: pixelclub:item/worldquest/halloween_candy
+  lore:
+    - " "
+    - "&7ลูกอมต้องสาปจากเทศกาลฮาโลวีน"
+    - "&7นำไปป้อนฟักทอง &#FF9A3CWorld Quest &7ที่ spawn"
+    - " "
+    - "&#FF9A3C▸ ถือแล้วคลิกขวาที่ฟักทอง"
+  custom_model_data: 12010

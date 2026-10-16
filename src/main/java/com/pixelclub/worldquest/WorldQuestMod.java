@@ -1,7 +1,10 @@
 package com.pixelclub.worldquest;
 
 import com.pixelclub.worldquest.command.WqCommands;
+import com.pixelclub.worldquest.event.EventCommands;
+import com.pixelclub.worldquest.event.EventQuest;
 import com.pixelclub.worldquest.quest.QuestService;
+import com.pixelclub.worldquest.state.Ledger;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
@@ -23,7 +26,8 @@ import java.nio.file.Path;
 /**
  * Pixelclub World Quest — a server-wide community goal on a spawn hologram. Quest 1 ("endless_unlock"): 100 tower
  * conquerors plus a donation fund of money and items (both destroyed on the way in) unlock Endless Tower; opening is
- * an admin action.
+ * an admin action. Event quest (Halloween 2026, {@link EventQuest}): the server feeds candy to a client-side pumpkin
+ * monument before a deadline; it runs on its own and keeps working if the endless quest failed to start.
  *
  * <p>Threading: every listener here runs on the server thread except DISCONNECT, which Fabric fires on the netty
  * thread on this server — so it is deliberately not used (viewer sets are pruned by the tick instead).
@@ -34,6 +38,7 @@ public final class WorldQuestMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     private static volatile QuestService service;
+    private static volatile EventQuest event;
 
     public static QuestService service() {
         return service;
@@ -41,8 +46,10 @@ public final class WorldQuestMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        CommandRegistrationCallback.EVENT.register((dispatcher, registry, env) ->
-                WqCommands.register(dispatcher, WorldQuestMod::service));
+        CommandRegistrationCallback.EVENT.register((dispatcher, registry, env) -> {
+            WqCommands.register(dispatcher, WorldQuestMod::service);
+            EventCommands.register(dispatcher, () -> event);
+        });
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             try {
@@ -52,8 +59,25 @@ public final class WorldQuestMod implements ModInitializer {
             } catch (Throwable t) {
                 LOGGER.error("[WorldQuest] failed to start — the mod is inactive", t);
             }
+            try {
+                Path dir = Path.of("config", MOD_ID);
+                EventQuest e = new EventQuest(server, LOGGER, dir, new Ledger(dir.resolve("ledger-event"), LOGGER));
+                e.start();
+                event = e;
+            } catch (Throwable t) {
+                LOGGER.error("[WorldQuest] event quest failed to start — it is inactive", t);
+            }
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            EventQuest e = event;
+            event = null;
+            if (e != null) {
+                try {
+                    e.stop();
+                } catch (Throwable t) {
+                    LOGGER.error("[WorldQuest] event stop failed", t);
+                }
+            }
             QuestService s = service;
             service = null;
             if (s != null) {
@@ -65,6 +89,14 @@ public final class WorldQuestMod implements ModInitializer {
             }
         });
         ServerTickEvents.END_SERVER_TICK.register(server -> {
+            EventQuest e = event;
+            if (e != null) {
+                try {
+                    e.tick();
+                } catch (Throwable t) {
+                    LOGGER.error("[WorldQuest] event tick failed", t);
+                }
+            }
             QuestService s = service;
             if (s == null) return;
             try {
@@ -74,6 +106,8 @@ public final class WorldQuestMod implements ModInitializer {
             }
         });
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            EventQuest e = event;
+            if (e != null) e.onJoin(handler.getPlayer());
             QuestService s = service;
             if (s == null) return;
             try {
@@ -107,6 +141,14 @@ public final class WorldQuestMod implements ModInitializer {
     }
 
     private static boolean sealClick(ServerPlayer player, InteractionHand hand) {
+        EventQuest e = event;
+        if (e != null) {
+            try {
+                if (e.onUse(player, hand)) return true;
+            } catch (Throwable t) {
+                LOGGER.error("[WorldQuest] event right-click failed", t);
+            }
+        }
         QuestService s = service;
         if (s == null) return false;
         try {
