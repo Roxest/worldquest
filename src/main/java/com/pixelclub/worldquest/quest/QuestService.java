@@ -275,8 +275,11 @@ public final class QuestService {
         p.sendSystemMessage(Text.of(config.messages.prefix + legacy));
     }
 
+    /** Every player on this backend, and (X4, LPC relay on) on the other backends: one network fund. */
     private void broadcast(String legacy) {
-        server.getPlayerList().broadcastSystemMessage(Text.of(config.messages.prefix + legacy), false);
+        Component line = Text.of(config.messages.prefix + legacy);
+        server.getPlayerList().broadcastSystemMessage(line, false);
+        com.pixelclub.worldquest.util.NetRelay.toOtherBackends(line);
     }
 
     // ================================================================== conquerors
